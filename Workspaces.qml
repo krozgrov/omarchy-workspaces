@@ -112,10 +112,14 @@ BarWidget {
   }
 
   // Hyprland owns the pointer during a Super+drag, so the bar cannot receive
-  // hover events. Poll its global position while the drag is held and move the
-  // window as soon as it crosses a workspace button.
+  // hover events. One bar instance polls the global cursor and checks every
+  // workspace pill, including pills on other monitors.
   property bool windowDragActive: false
   property bool finalDragPositionPending: false
+  property bool dragStartReady: false
+  property bool dragMoved: false
+  property real dragStartX: 0
+  property real dragStartY: 0
   property int lastDragWorkspace: -1
 
   function shareDragWorkspace(id) {
@@ -127,23 +131,21 @@ BarWidget {
   }
 
   function beginWindowDrag() {
+    var focused = Hyprland.focusedMonitor
+    // The focused monitor's widget owns this drag, avoiding duplicate pollers.
+    if (!root.monitor || (focused && focused.name !== root.monitor.name)) return
     root.windowDragActive = true
     root.finalDragPositionPending = false
-    var focused = Hyprland.focusedMonitor
+    root.dragStartReady = false
+    root.dragMoved = false
     var workspace = focused && focused.activeWorkspace ? focused.activeWorkspace.id : root.activeWorkspaceId()
     root.shareDragWorkspace(workspace)
     root.pollWindowDrag()
     dragPoll.start()
   }
 
-  function endWindowDrag() {
-    root.windowDragActive = false
-    root.finalDragPositionPending = true
-    dragPoll.stop()
-    root.pollWindowDrag()
-  }
-
   function finishWindowDrop() {
+    if (!root.windowDragActive) return
     root.windowDragActive = false
     root.finalDragPositionPending = true
     dragPoll.stop()
@@ -156,24 +158,52 @@ BarWidget {
     cursorProc.running = true
   }
 
+  function workspaceAt(x, y) {
+    for (var i = 0; i < workspaceRepeater.count; i++) {
+      var button = workspaceRepeater.itemAt(i)
+      if (!button || button.width <= 0 || button.height <= 0) continue
+      var topLeft = button.mapToGlobal(0, 0)
+      if (x >= topLeft.x && x < topLeft.x + button.width && y >= topLeft.y && y < topLeft.y + button.height)
+        return root.workspaceIds()[i]
+    }
+    return -1
+  }
+
+  function workspaceAtAnyBar(x, y) {
+    var items = root.bar && typeof root.bar.moduleWidgets === "function"
+      ? root.bar.moduleWidgets(root.moduleName) : [root]
+    for (var i = 0; i < items.length; i++) {
+      if (!items[i] || typeof items[i].workspaceAt !== "function") continue
+      var target = items[i].workspaceAt(x, y)
+      if (target >= 0) return target
+    }
+    return -1
+  }
+
   function applyWindowDragPosition(output) {
     if (!root.windowDragActive && !root.finalDragPositionPending) return
     var match = String(output || "").trim().match(/^(-?\d+)\s*,\s*(-?\d+)$/)
     if (!match) return
     var x = Number(match[1])
     var y = Number(match[2])
-    for (var i = 0; i < workspaceRepeater.count; i++) {
-      var button = workspaceRepeater.itemAt(i)
-      if (!button || button.width <= 0 || button.height <= 0) continue
-      var topLeft = button.mapToGlobal(0, 0)
-      if (x >= topLeft.x && x < topLeft.x + button.width && y >= topLeft.y && y < topLeft.y + button.height) {
-        var target = root.workspaceIds()[i]
-        if (target !== root.lastDragWorkspace) {
-          root.shareDragWorkspace(target)
-          root.dispatch("hl.dsp.window.move({ workspace = \"" + target + "\", follow = true })")
-        }
-        break
+    if (!root.dragStartReady) {
+      root.dragStartX = x
+      root.dragStartY = y
+      root.dragStartReady = true
+      root.finalDragPositionPending = false
+      return
+    }
+    if (!root.dragMoved) {
+      if (Math.hypot(x - root.dragStartX, y - root.dragStartY) < 4) {
+        root.finalDragPositionPending = false
+        return
       }
+      root.dragMoved = true
+    }
+    var target = root.workspaceAtAnyBar(x, y)
+    if (target >= 0 && target !== root.lastDragWorkspace) {
+      root.shareDragWorkspace(target)
+      root.dispatch("hl.dsp.window.move({ workspace = \"" + target + "\", follow = true })")
     }
     root.finalDragPositionPending = false
   }
@@ -305,7 +335,6 @@ BarWidget {
 
     function refresh(): void { root.broadcast("refresh") }
     function beginWindowDrag(): void { root.broadcast("beginWindowDrag") }
-    function endWindowDrag(): void { root.broadcast("endWindowDrag") }
     function windowDropped(): void { root.broadcast("finishWindowDrop") }
   }
 
@@ -318,7 +347,7 @@ BarWidget {
 
   Timer {
     id: dragPoll
-    interval: 35
+    interval: 16
     repeat: true
     onTriggered: root.pollWindowDrag()
   }
