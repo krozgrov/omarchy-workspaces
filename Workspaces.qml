@@ -121,6 +121,7 @@ BarWidget {
   property real dragStartX: 0
   property real dragStartY: 0
   property int lastDragWorkspace: -1
+  property string dragWindowAddress: ""
 
   function shareDragWorkspace(id) {
     var items = root.bar && typeof root.bar.moduleWidgets === "function"
@@ -134,6 +135,9 @@ BarWidget {
     var focused = Hyprland.focusedMonitor
     // The focused monitor's widget owns this drag, avoiding duplicate pollers.
     if (!root.monitor || (focused && focused.name !== root.monitor.name)) return
+    var toplevel = Hyprland.activeToplevel
+    if (!toplevel || !toplevel.address) return
+    root.dragWindowAddress = String(toplevel.address)
     root.windowDragActive = true
     root.finalDragPositionPending = false
     root.dragStartReady = false
@@ -203,7 +207,9 @@ BarWidget {
     var target = root.workspaceAtAnyBar(x, y)
     if (target >= 0 && target !== root.lastDragWorkspace) {
       root.shareDragWorkspace(target)
-      root.dispatch("hl.dsp.window.move({ workspace = \"" + target + "\", follow = true })")
+      if (/^0x[0-9a-fA-F]+$/.test(root.dragWindowAddress)) {
+        Hyprland.dispatch('hl.dsp.window.move({ workspace = "' + target + '", follow = true, window = "address:' + root.dragWindowAddress + '" })')
+      }
     }
     root.finalDragPositionPending = false
   }
@@ -347,7 +353,7 @@ BarWidget {
 
   Timer {
     id: dragPoll
-    interval: 16
+    interval: 8
     repeat: true
     onTriggered: root.pollWindowDrag()
   }

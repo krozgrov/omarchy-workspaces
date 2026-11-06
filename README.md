@@ -2,7 +2,7 @@
 
 A small customization of Omarchy's built-in workspace bar widget. It keeps the existing workspace pills and lets you move a window as you drag over them while holding Super and the left mouse button. You do not need to release the button to switch the window between workspaces.
 
-The plugin samples `hyprctl cursorpos` every 16 ms only during a Super+left-button drag. It matches the pointer against the live workspace-pill bounds and sends the active window to the hovered workspace, following it. It stops polling when the mouse button is released.
+The plugin samples `hyprctl cursorpos` every 8 ms only during a Super+left-button drag. It matches the pointer against the live workspace-pill bounds and sends the window grabbed at drag start to the hovered workspace, following it. Workspace moves go through Quickshell's Hyprland IPC, and polling stops when the mouse button is released.
 
 ## Install
 
